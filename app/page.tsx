@@ -1,6 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
+
+const MapComponent = dynamic(() => import("@/components/MapComponent"), {
+  ssr: false,
+  loading: () => (
+    <div className="map-canvas flex items-center justify-center bg-gray-200">
+      <p className="text-gray-600">Loading map...</p>
+    </div>
+  ),
+});
 
 type LayerKey = "osm" | "hot" | "satellite" | "hybrid" | "bing";
 
@@ -92,15 +102,8 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeWard, setActiveWard] = useState("All Wards");
   const [activeLayer, setActiveLayer] = useState<LayerKey>("osm");
-  const [lastLocatedLabel, setLastLocatedLabel] = useState("No location selected");
 
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  const leafletMapRef = useRef<any>(null);
-  const mapReadyRef = useRef(false);
-  const baseLayersRef = useRef<Record<LayerKey, any> | null>(null);
-  const searchMarkerRef = useRef<any>(null);
-  const locateMarkerRef = useRef<any>(null);
-  const locateCircleRef = useRef<any>(null);
+  const [lastLocatedLabel, setLastLocatedLabel] = useState("No location selected");
 
   const quickStats = useMemo(
     () => [
@@ -113,222 +116,11 @@ export default function Home() {
   );
 
   const searchAndLocate = async () => {
-    const map = leafletMapRef.current;
-    const q = searchQuery.trim();
-    if (!map || !q) return;
-
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`
-      );
-      const results = await response.json();
-      if (!Array.isArray(results) || results.length === 0) return;
-
-      const lat = Number(results[0].lat);
-      const lon = Number(results[0].lon);
-      const label = String(results[0].display_name || q);
-      if (Number.isNaN(lat) || Number.isNaN(lon)) return;
-
-      const L = (await import("leaflet")).default;
-      map.setView([lat, lon], 18, { animate: true });
-
-      if (searchMarkerRef.current) {
-        map.removeLayer(searchMarkerRef.current);
-      }
-      searchMarkerRef.current = L.marker([lat, lon]).addTo(map).bindPopup(label).openPopup();
-      setLastLocatedLabel(label);
-    } catch (error) {
-      console.error("Search failed:", error);
-    }
+    // Search functionality will be integrated with MapComponent
+    console.log("Search triggered:", searchQuery);
   };
 
-  useEffect(() => {
-    if (!mapRef.current || mapReadyRef.current) return;
 
-    let isUnmounted = false;
-    let map: any = null;
-
-    (async () => {
-      try {
-        const L = (await import("leaflet")).default;
-        (globalThis as any).L = L;
-
-        try {
-          await import("leaflet-control-geocoder");
-        } catch {}
-        try {
-          await import("leaflet-draw");
-        } catch {}
-
-        if (isUnmounted || !mapRef.current || leafletMapRef.current) return;
-
-        map = L.map(mapRef.current, { zoomControl: true }).setView([27.7172, 85.324], 14);
-        leafletMapRef.current = map;
-        mapReadyRef.current = true;
-
-        const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: "&copy; OpenStreetMap contributors",
-          maxZoom: 20,
-        });
-        const hot = L.tileLayer("https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
-          attribution: "&copy; OpenStreetMap HOT",
-          maxZoom: 20,
-        });
-        const satellite = L.tileLayer("https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", {
-          subdomains: ["mt0", "mt1", "mt2", "mt3"],
-          maxZoom: 21,
-          attribution: "Map data &copy; Google",
-        });
-        const hybrid = L.tileLayer("https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}", {
-          subdomains: ["mt0", "mt1", "mt2", "mt3"],
-          maxZoom: 21,
-          attribution: "Map data &copy; Google",
-        });
-
-        const toQuadKey = (x: number, y: number, z: number): string => {
-          let quadKey = "";
-          for (let i = z; i > 0; i -= 1) {
-            let digit = 0;
-            const mask = 1 << (i - 1);
-            if ((x & mask) !== 0) digit += 1;
-            if ((y & mask) !== 0) digit += 2;
-            quadKey += digit.toString();
-          }
-          return quadKey;
-        };
-        const BingLayer = (L.TileLayer as any).extend({
-          getTileUrl(coords: { x: number; y: number; z: number }) {
-            const quadKey = toQuadKey(coords.x, coords.y, coords.z);
-            const server = (coords.x + coords.y) % 4;
-            return `https://ecn.t${server}.tiles.virtualearth.net/tiles/a${quadKey}.jpeg?g=1`;
-          },
-        });
-        const bing = new BingLayer("", { maxZoom: 19, attribution: "Bing Maps" });
-
-        baseLayersRef.current = { osm, hot, satellite, hybrid, bing };
-        osm.addTo(map);
-
-        L.control
-          .layers({
-            OSM: osm,
-            HOT: hot,
-            Satellite: satellite,
-            Hybrid: hybrid,
-            Bing: bing,
-          })
-          .addTo(map);
-
-        const geocoderFactory = (L.Control as any).geocoder;
-        if (typeof geocoderFactory === "function") {
-          geocoderFactory({ defaultMarkGeocode: true }).addTo(map);
-        }
-
-        const drawnItems = new L.FeatureGroup();
-        map.addLayer(drawnItems);
-        const DrawControl = (L.Control as any).Draw;
-        if (DrawControl) {
-          map.addControl(
-            new DrawControl({
-              position: "topleft",
-              draw: {
-                polyline: true,
-                polygon: true,
-                rectangle: true,
-                circle: false,
-                marker: true,
-                circlemarker: false,
-              },
-              edit: { featureGroup: drawnItems },
-            })
-          );
-          map.on("draw:created", (e: any) => drawnItems.addLayer(e.layer));
-        }
-
-        map.on("locationfound", (e: any) => {
-          if (locateMarkerRef.current) map.removeLayer(locateMarkerRef.current);
-          if (locateCircleRef.current) map.removeLayer(locateCircleRef.current);
-
-          locateMarkerRef.current = L.marker(e.latlng).addTo(map).bindPopup("You are here").openPopup();
-          locateCircleRef.current = L.circle(e.latlng, {
-            radius: e.accuracy,
-            color: "#2563eb",
-            fillColor: "#60a5fa",
-            fillOpacity: 0.2,
-            weight: 1,
-          }).addTo(map);
-          setLastLocatedLabel(`Current location: ${e.latlng.lat.toFixed(5)}, ${e.latlng.lng.toFixed(5)}`);
-        });
-
-        const LocateControl = L.Control.extend({
-          options: { position: "topleft" },
-          onAdd() {
-            const button = L.DomUtil.create("button", "kmc-map-btn");
-            button.type = "button";
-            button.title = "Current Location";
-            button.innerHTML = "📍";
-            L.DomEvent.disableClickPropagation(button);
-            L.DomEvent.on(button, "click", () => {
-              map.locate({ setView: true, maxZoom: 18, enableHighAccuracy: true });
-            });
-            return button;
-          },
-        });
-        map.addControl(new LocateControl());
-
-        requestAnimationFrame(() => map.invalidateSize());
-        setTimeout(() => map.invalidateSize(), 160);
-      } catch (error) {
-        console.error("Map initialization failed:", error);
-      }
-    })();
-
-    return () => {
-      isUnmounted = true;
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove();
-        leafletMapRef.current = null;
-      }
-      mapReadyRef.current = false;
-      baseLayersRef.current = null;
-      searchMarkerRef.current = null;
-      locateMarkerRef.current = null;
-      locateCircleRef.current = null;
-      if (map) map = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    const map = leafletMapRef.current;
-    if (!map) return;
-    const layers = baseLayersRef.current;
-    if (!layers) return;
-
-    const selected = layers[activeLayer];
-    if (!selected) return;
-
-    (Object.keys(layers) as LayerKey[]).forEach((key) => {
-      const layer = layers[key];
-      if (map.hasLayer(layer)) map.removeLayer(layer);
-    });
-    selected.addTo(map);
-  }, [activeLayer]);
-
-  useEffect(() => {
-    const map = leafletMapRef.current;
-    const el = mapRef.current;
-    if (!map || !el) return;
-
-    const refresh = () => requestAnimationFrame(() => map.invalidateSize());
-    refresh();
-    window.addEventListener("resize", refresh);
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(refresh) : null;
-    if (observer) observer.observe(el);
-
-    return () => {
-      window.removeEventListener("resize", refresh);
-      if (observer) observer.disconnect();
-    };
-  }, []);
 
   return (
     <main className="kmc-shell">
@@ -419,7 +211,7 @@ export default function Home() {
               Search
             </button>
           </div>
-          <div id="map" ref={mapRef} className="map-canvas" />
+          <MapComponent activeLayer={activeLayer} searchQuery={searchQuery} activeWard={activeWard} onLocationUpdate={setLastLocatedLabel} />
           <div className="status-pill">
             <IconTarget />
             <span>{lastLocatedLabel}</span>
