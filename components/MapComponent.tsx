@@ -1,7 +1,6 @@
 'use client';
 
-import 'leaflet/dist/leaflet.css';
-import 'leaflet-draw/dist/leaflet.draw.css';
+
 import { useEffect, useRef } from 'react';
 
 interface MapComponentProps {
