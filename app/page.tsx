@@ -2,9 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import "leaflet/dist/leaflet.css";
-import "leaflet-draw/dist/leaflet.draw.css";
-
 type LayerKey = "osm" | "hot" | "satellite" | "hybrid" | "bing";
 
 const WARDS = [
